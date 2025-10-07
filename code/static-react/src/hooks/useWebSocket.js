@@ -91,7 +91,7 @@ function useWebSocket() {
   }, []);
 
   const handleJSONMessage = useCallback((data) => {
-    const { type, content, sentence_id } = data;
+    const { type, content } = data;
 
     switch (type) {
       case 'partial_user_request':
@@ -132,28 +132,7 @@ function useWebSocket() {
         });
         break;
 
-      case 'assistant_sentence':
-        // NEW: Each sentence gets its own bubble
-        setMessages((prev) => {
-          if (content?.trim()) {
-            return [
-              ...prev,
-              {
-                id: `assistant-sentence-${sentence_id}-${Date.now()}`,
-                role: 'assistant',
-                content,
-                type: 'final', // Show as final immediately (it's being spoken)
-                timestamp: Date.now(),
-                sentence_id,
-              },
-            ];
-          }
-          return prev;
-        });
-        break;
-
       case 'partial_assistant_answer':
-        // Keep for backward compatibility, but won't be used with sentence mode
         setMessages((prev) => {
           const filtered = prev.filter((m) => m.type !== 'partial' || m.role !== 'assistant');
           if (content?.trim()) {
@@ -173,14 +152,21 @@ function useWebSocket() {
         break;
 
       case 'final_assistant_answer':
-        // With sentence mode, this just ensures all sentences are marked final
         setMessages((prev) => {
-          return prev.map((msg) => {
-            if (msg.role === 'assistant' && msg.type === 'partial') {
-              return { ...msg, type: 'final' };
-            }
-            return msg;
-          });
+          const filtered = prev.filter((m) => m.type !== 'partial' || m.role !== 'assistant');
+          if (content?.trim()) {
+            return [
+              ...filtered,
+              {
+                id: `final-assistant-${Date.now()}`,
+                role: 'assistant',
+                content,
+                type: 'final',
+                timestamp: Date.now(),
+              },
+            ];
+          }
+          return filtered;
         });
         break;
 
