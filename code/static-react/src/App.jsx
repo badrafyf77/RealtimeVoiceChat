@@ -7,7 +7,7 @@ import useWebcam from './hooks/useWebcam';
 import useAudioCapture from './hooks/useAudioCapture';
 
 function App() {
-  const [candidateName, setCandidateName] = useState('Aaron Wang');
+  const [candidateName, setCandidateName] = useState('Afyf Badreddine');
   const [interviewTitle, setInterviewTitle] = useState('Developer Intern Interview');
   const [isRecording, setIsRecording] = useState(false);
 

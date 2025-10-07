@@ -21,7 +21,7 @@ function MessageBubble({ message }) {
     >
       {/* Speaker Name */}
       <div className={`text-xs font-medium mb-1 ${isAI ? 'text-gray-600' : 'text-blue-600'}`}>
-        {isAI ? 'Alex' : message.role === 'user' ? 'Aaron Wang' : 'You'}
+        {isAI ? 'Alex' : message.role === 'user' ? 'Afyf Badreddine' : 'You'}
       </div>
 
       {/* Message Bubble */}
