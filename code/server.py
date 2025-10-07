@@ -165,6 +165,26 @@ async def favicon():
     """
     return FileResponse("static/favicon.ico")
 
+@app.get("/app.js")
+async def app_js():
+    """
+    Serves the app.js file.
+
+    Returns:
+        A FileResponse containing the app.js
+    """
+    return FileResponse("static/app.js")
+
+@app.get("/app.css")
+async def app_css():
+    """
+    Serves the app.css file.
+
+    Returns:
+        A FileResponse containing the app.css
+    """
+    return FileResponse("static/app.css")
+
 @app.get("/")
 async def get_index() -> HTMLResponse:
     """
