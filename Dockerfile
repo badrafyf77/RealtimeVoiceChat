@@ -129,7 +129,7 @@ except Exception as e:
 EOF
 
 # <<<--- faster-whisper Pre-download --->>>
-ARG WHISPER_MODEL=base.en
+ARG WHISPER_MODEL=medium.en
 ENV WHISPER_MODEL=${WHISPER_MODEL}
 RUN echo "Preloading faster_whisper model: ${WHISPER_MODEL}" && \
     # Note: Downloads happen as root, cache dir likely ~/.cache/huggingface or similar

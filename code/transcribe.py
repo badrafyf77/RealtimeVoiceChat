@@ -26,15 +26,15 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "use_microphone": False,
     "spinner": False,
     # Use a slightly larger model for better accuracy (adjust if GPU is weak)
-    "model": "base.en",
-    "realtime_model_type": "base.en",
+    "model": "medium.en",
+    "realtime_model_type": "medium.en",
     "use_main_model_for_realtime": True,
     "language": "en", # Default, will be overridden by source_language in __init__
     # VAD and segmentation tuning
     "silero_sensitivity": 0.25,
     "webrtc_sensitivity": 3,
-    "post_speech_silence_duration": 1,
-    "min_length_of_recording": 0.5,
+    "post_speech_silence_duration": 2,
+    "min_length_of_recording": 0.7,
     "min_gap_between_recordings": 0.05,
     "enable_realtime_transcription": True,
     "realtime_processing_pause": 0.01,
@@ -42,7 +42,7 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "silero_deactivity_detection": True,
     "early_transcription_on_silence": 0,
     # Increase beam sizes for accuracy (slight latency cost)
-    "beam_size": 7,
+    "beam_size": 4,
     "beam_size_realtime": 3,
     "no_log_file": True,
     "wake_words": "jarvis",
