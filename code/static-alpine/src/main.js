@@ -137,7 +137,7 @@ Alpine.data('voiceChat', () => ({
 
 // Render the app
 document.getElementById('app').innerHTML = `
-  <div x-data="voiceChat" class="flex flex-col min-h-screen bg-zinc-50 dark:bg-zinc-900">
+  <div x-data="voiceChat" class="flex flex-col h-screen bg-zinc-50 dark:bg-zinc-900">
     <!-- Header -->
     <header class="sticky top-0 z-40 bg-white dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
       <div class="px-5 sm:px-8 py-4">
@@ -180,55 +180,55 @@ document.getElementById('app').innerHTML = `
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 flex overflow-hidden">
-      <div class="flex-1 flex flex-col lg:flex-row h-full">
-        <!-- Video Panel - Fixed, no scroll -->
-        <div class="flex-1 p-5 sm:p-8 flex items-center justify-center overflow-hidden">
-          <div class="relative w-full aspect-video max-w-5xl bg-zinc-900 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-lg">
-            <video 
-              x-ref="video" 
-              autoplay 
-              playsinline 
-              muted
-              class="w-full h-full object-cover"
-            ></video>
-            
-            <!-- Recording Indicator -->
-            <div x-show="isRecording" class="absolute top-4 left-4 flex items-center gap-2 bg-red-500/90 backdrop-blur-sm px-3 py-2 rounded-lg">
-              <div class="relative">
-                <div class="w-2.5 h-2.5 bg-white rounded-full"></div>
-                <div class="absolute inset-0 w-2.5 h-2.5 bg-white rounded-full pulse-ring"></div>
-              </div>
-              <span class="text-white text-sm font-medium">Recording</span>
+    <main class="flex-1 flex h-full">
+      <!-- Video Panel - Fixed position, no scroll -->
+      <div class="flex-1 flex items-center justify-center p-5 sm:p-8 bg-zinc-50 dark:bg-zinc-900 video-panel">
+        <div class="relative w-full max-w-4xl aspect-video bg-zinc-900 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-lg">
+          <video 
+            x-ref="video" 
+            autoplay 
+            playsinline 
+            muted
+            class="w-full h-full object-cover"
+          ></video>
+          
+          <!-- Recording Indicator -->
+          <div x-show="isRecording" class="absolute top-4 left-4 flex items-center gap-2 bg-red-500/90 backdrop-blur-sm px-3 py-2 rounded-lg">
+            <div class="relative">
+              <div class="w-2.5 h-2.5 bg-white rounded-full"></div>
+              <div class="absolute inset-0 w-2.5 h-2.5 bg-white rounded-full pulse-ring"></div>
             </div>
+            <span class="text-white text-sm font-medium">Recording</span>
+          </div>
 
-            <!-- TTS Playing Indicator -->
-            <div x-show="isTTSPlaying" class="absolute top-4 right-4 bg-blue-500/90 backdrop-blur-sm px-3 py-2 rounded-lg">
-              <span class="text-white text-sm font-medium">🔊 AI Speaking</span>
-            </div>
+          <!-- TTS Playing Indicator -->
+          <div x-show="isTTSPlaying" class="absolute top-4 right-4 bg-blue-500/90 backdrop-blur-sm px-3 py-2 rounded-lg">
+            <span class="text-white text-sm font-medium">🔊 AI Speaking</span>
           </div>
         </div>
+      </div>
 
-        <!-- Transcript Panel - Scrollable independently -->
-        <div class="w-full lg:w-96 bg-white dark:bg-zinc-800 border-t lg:border-t-0 lg:border-l border-zinc-200 dark:border-zinc-700 flex flex-col">
-          <div class="px-5 py-4 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-            <h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Conversation</h2>
-            <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">Real-time transcript</p>
-          </div>
-          
-          <div x-ref="transcript" class="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hidden">
-            <template x-for="message in messages" :key="message.id">
-              <div class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-                <div :class="getMessageClass(message)" x-text="message.content"></div>
-              </div>
-            </template>
-            
-            <div x-show="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center">
-              <svg class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
-              </svg>
-              <p class="text-zinc-500 dark:text-zinc-400">Start recording to begin</p>
+      <!-- Transcript Panel - Fixed width, scrollable content -->
+      <div class="w-full lg:w-96 xl:w-[28rem] bg-white dark:bg-zinc-800 border-l border-zinc-200 dark:border-zinc-700 transcript-panel">
+        <!-- Header - Fixed -->
+        <div class="px-5 py-4 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
+          <h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Conversation</h2>
+          <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">Real-time transcript</p>
+        </div>
+        
+        <!-- Messages - Scrollable area -->
+        <div x-ref="transcript" class="transcript-content p-5 space-y-3 scrollbar-hidden">
+          <template x-for="message in messages" :key="message.id">
+            <div class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
+              <div :class="getMessageClass(message)" x-text="message.content"></div>
             </div>
+          </template>
+          
+          <div x-show="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center">
+            <svg class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+            </svg>
+            <p class="text-zinc-500 dark:text-zinc-400">Start recording to begin</p>
           </div>
         </div>
       </div>
