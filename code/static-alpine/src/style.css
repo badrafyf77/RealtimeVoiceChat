@@ -67,4 +67,9 @@ html, body {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  scroll-behavior: smooth;
+  /* Better scrolling on webkit browsers */
+  -webkit-overflow-scrolling: touch;
+  /* Ensure proper scrolling momentum */
+  overscroll-behavior: contain;
 }

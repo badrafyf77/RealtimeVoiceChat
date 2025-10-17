@@ -15,6 +15,7 @@ Alpine.data('voiceChat', () => ({
   messages: [],
   webcamStream: null,
   webcamError: null,
+  userScrolled: false,
   
   // Managers
   ws: null,
@@ -37,6 +38,18 @@ Alpine.data('voiceChat', () => ({
         this.$refs.video.srcObject = stream;
       },
       onError: (error) => { this.webcamError = error; }
+    });
+
+    // Add scroll event listener for better UX
+    this.$nextTick(() => {
+      const transcriptContainer = this.$refs.transcript;
+      if (transcriptContainer) {
+        transcriptContainer.addEventListener('scroll', () => {
+          const { scrollTop, scrollHeight, clientHeight } = transcriptContainer;
+          const isAtBottom = scrollTop + clientHeight >= scrollHeight - 10;
+          this.userScrolled = !isAtBottom;
+        });
+      }
     });
   },
 
@@ -109,28 +122,39 @@ Alpine.data('voiceChat', () => ({
       }];
     }
 
-    // Always scroll to bottom when message updates
-    this.scrollToBottom();
+    // Only auto-scroll if user hasn't manually scrolled up
+    if (!this.userScrolled) {
+      this.scrollToBottom();
+    }
   },
 
   scrollToBottom() {
-    // Use both nextTick and setTimeout to ensure scroll happens after DOM update
+    // Smooth scroll to bottom with proper timing
     this.$nextTick(() => {
       setTimeout(() => {
         const container = this.$refs.transcript;
         if (container) {
-          container.scrollTop = container.scrollHeight;
+          // Ensure we scroll to the very bottom
+          const scrollHeight = container.scrollHeight;
+          const clientHeight = container.clientHeight;
+          const maxScrollTop = scrollHeight - clientHeight;
+          
+          // Smooth scroll to bottom
+          container.scrollTo({
+            top: maxScrollTop,
+            behavior: 'smooth'
+          });
         }
-      }, 10);
+      }, 100);
     });
   },
 
   getMessageClass(message) {
-    const base = 'px-4 py-3 rounded-lg max-w-[85%] break-words text-sm';
+    const base = 'px-4 py-3 rounded-lg max-w-[85%] break-words text-sm leading-relaxed';
     const opacity = message.type === 'partial' ? 'opacity-60' : '';
     const color = message.role === 'user' 
-      ? 'bg-blue-600 text-white ml-auto' 
-      : 'bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100';
+      ? 'bg-blue-600 text-white ml-auto shadow-sm' 
+      : 'bg-zinc-100 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm';
     return `${base} ${color} ${opacity}`;
   }
 }));
@@ -217,18 +241,34 @@ document.getElementById('app').innerHTML = `
         </div>
         
         <!-- Messages - Scrollable area -->
-        <div x-ref="transcript" class="transcript-content p-5 space-y-3 scrollbar-hidden">
-          <template x-for="message in messages" :key="message.id">
-            <div class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
-              <div :class="getMessageClass(message)" x-text="message.content"></div>
+        <div class="relative flex-1">
+          <div x-ref="transcript" class="transcript-content px-5 py-4 space-y-4 scrollbar-hidden h-full">
+            <div class="space-y-4">
+              <template x-for="message in messages" :key="message.id">
+                <div class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
+                  <div :class="getMessageClass(message)" x-text="message.content"></div>
+                </div>
+              </template>
             </div>
-          </template>
+            
+            <!-- Bottom padding for smooth scrolling -->
+            <div class="h-6"></div>
+            
+            <div x-show="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center -mt-4">
+              <svg class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+              </svg>
+              <p class="text-zinc-500 dark:text-zinc-400">Start recording to begin</p>
+            </div>
+          </div>
           
-          <div x-show="messages.length === 0" class="flex flex-col items-center justify-center h-full text-center">
-            <svg class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+          <!-- Scroll to bottom button -->
+          <div x-show="userScrolled && messages.length > 0" 
+               @click="scrollToBottom(); userScrolled = false"
+               class="absolute bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg cursor-pointer transition-all duration-200 hover:scale-105">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
             </svg>
-            <p class="text-zinc-500 dark:text-zinc-400">Start recording to begin</p>
           </div>
         </div>
       </div>
