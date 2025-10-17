@@ -42,7 +42,7 @@ DEFAULT_RECORDER_CONFIG: Dict[str, Any] = {
     "silero_deactivity_detection": True,
     "early_transcription_on_silence": 0,
     # Increase beam sizes for accuracy (slight latency cost)
-    "beam_size": 4,
+    "beam_size": 3,
     "beam_size_realtime": 3,
     "no_log_file": True,
     "wake_words": "jarvis",
