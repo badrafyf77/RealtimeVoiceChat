@@ -40,7 +40,7 @@ body {
   animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* Ensure proper height management for meeting-style layout */
+/* Simple, clean layout */
 html, body {
   height: 100%;
   overflow: hidden;
@@ -48,28 +48,4 @@ html, body {
 
 #app {
   height: 100vh;
-}
-
-/* Video panel should never scroll */
-.video-panel {
-  position: relative;
-  overflow: hidden;
-}
-
-/* Transcript panel should scroll independently */
-.transcript-panel {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.transcript-content {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scroll-behavior: smooth;
-  /* Better scrolling on webkit browsers */
-  -webkit-overflow-scrolling: touch;
-  /* Ensure proper scrolling momentum */
-  overscroll-behavior: contain;
 }
