@@ -185,6 +185,16 @@ async def app_css():
     """
     return FileResponse("static/app.css")
 
+@app.get("/index.css")
+async def index_css():
+    """
+    Serves the index.css file.
+
+    Returns:
+        A FileResponse containing the index.css
+    """
+    return FileResponse("static/index.css")
+
 @app.get("/")
 async def get_index() -> HTMLResponse:
     """
