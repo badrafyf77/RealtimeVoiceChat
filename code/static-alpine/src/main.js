@@ -180,10 +180,10 @@ document.getElementById('app').innerHTML = `
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-hidden">
-      <div class="h-full flex flex-col lg:flex-row">
-        <!-- Video Panel -->
-        <div class="flex-1 p-5 sm:p-8 flex items-center justify-center">
+    <main class="flex-1 flex overflow-hidden">
+      <div class="flex-1 flex flex-col lg:flex-row h-full">
+        <!-- Video Panel - Fixed, no scroll -->
+        <div class="flex-1 p-5 sm:p-8 flex items-center justify-center overflow-hidden">
           <div class="relative w-full aspect-video max-w-5xl bg-zinc-900 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-lg">
             <video 
               x-ref="video" 
@@ -209,14 +209,14 @@ document.getElementById('app').innerHTML = `
           </div>
         </div>
 
-        <!-- Transcript Panel -->
-        <div class="w-full lg:w-96 bg-white dark:bg-zinc-800 border-t lg:border-t-0 lg:border-l border-zinc-200 dark:border-zinc-700 flex flex-col h-full lg:h-auto">
+        <!-- Transcript Panel - Scrollable independently -->
+        <div class="w-full lg:w-96 bg-white dark:bg-zinc-800 border-t lg:border-t-0 lg:border-l border-zinc-200 dark:border-zinc-700 flex flex-col">
           <div class="px-5 py-4 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
             <h2 class="text-lg font-semibold text-zinc-900 dark:text-white">Conversation</h2>
             <p class="text-sm text-zinc-600 dark:text-zinc-400 mt-1">Real-time transcript</p>
           </div>
           
-          <div x-ref="transcript" class="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hidden min-h-0">
+          <div x-ref="transcript" class="flex-1 overflow-y-auto p-5 space-y-3 scrollbar-hidden">
             <template x-for="message in messages" :key="message.id">
               <div class="flex" :class="message.role === 'user' ? 'justify-end' : 'justify-start'">
                 <div :class="getMessageClass(message)" x-text="message.content"></div>
