@@ -5,12 +5,14 @@ import logging
 import time
 from queue import Queue, Empty
 import sys
+import uuid
 
 # (Make sure real/mock imports are correct)
 from audio_module import AudioProcessor
 from text_similarity import TextSimilarity
 from text_context import TextContext
 from llm_module import LLM
+from bedrock_agent_llm import BedrockAgentLLM
 from colors import Colors
 
 # (Logging setup)
@@ -126,6 +128,10 @@ class SpeechPipelineManager:
             llm_model: str = "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M",
             no_think: bool = False,
             orpheus_model: str = "orpheus-3b-0.1-ft-Q8_0-GGUF/orpheus-3b-0.1-ft-q8_0.gguf",
+            # Bedrock-specific parameters
+            bedrock_agent_id: Optional[str] = None,
+            bedrock_agent_alias_id: Optional[str] = None,
+            bedrock_region: str = "us-west-2",
         ):
         """
         Initializes the SpeechPipelineManager.
@@ -136,10 +142,13 @@ class SpeechPipelineManager:
 
         Args:
             tts_engine: The TTS engine to use (e.g., "kokoro", "orpheus").
-            llm_provider: The LLM backend provider (e.g., "ollama").
-            llm_model: The specific LLM model identifier.
+            llm_provider: The LLM backend provider (e.g., "ollama", "bedrock").
+            llm_model: The specific LLM model identifier (ignored for bedrock).
             no_think: If True, removes specific thinking tags from LLM output.
             orpheus_model: Path or identifier for the Orpheus TTS model, if used.
+            bedrock_agent_id: Bedrock Agent ID (required if llm_provider="bedrock").
+            bedrock_agent_alias_id: Bedrock Agent Alias ID (required if llm_provider="bedrock").
+            bedrock_region: AWS region for Bedrock (default: us-west-2).
         """
         self.tts_engine = tts_engine
         self.llm_provider = llm_provider
@@ -147,8 +156,12 @@ class SpeechPipelineManager:
         self.no_think = no_think
         self.orpheus_model = orpheus_model
 
+        # Bedrock session management (one session per WebSocket connection)
+        self.bedrock_session_id: Optional[str] = None
+
+        # System prompt (not used for Bedrock, but kept for other backends)
         self.system_prompt = system_prompt
-        if tts_engine == "orpheus":
+        if tts_engine == "orpheus" and llm_provider != "bedrock":
             self.system_prompt += f"\n{orpheus_prompt_addon}"
 
         # --- Instance Dependencies ---
@@ -161,15 +174,31 @@ class SpeechPipelineManager:
         self.text_context = TextContext()
         self.generation_counter: int = 0
         self.abort_lock = threading.Lock()
-        self.llm = LLM(
-            backend=self.llm_provider, # Or your backend
-            model=self.llm_model,
-            system_prompt=self.system_prompt,
-            no_think=no_think,
-        )
-        self.llm.prewarm()
-        self.llm_inference_time = self.llm.measure_inference_time()
-        logger.debug(f"🗣️🧠🕒 LLM inference time: {self.llm_inference_time:.2f}ms")
+        
+        # Initialize LLM based on provider
+        if self.llm_provider == "bedrock":
+            logger.info("🗣️🤖 Initializing Bedrock Agent LLM")
+            self.llm = BedrockAgentLLM(
+                agent_id=bedrock_agent_id,
+                agent_alias_id=bedrock_agent_alias_id,
+                region_name=bedrock_region
+            )
+            # Create session ID for this pipeline instance
+            self.bedrock_session_id = str(uuid.uuid4())
+            logger.info(f"🗣️🤖 Bedrock session ID: {self.bedrock_session_id}")
+            # Bedrock doesn't need prewarming or inference time measurement
+            self.llm_inference_time = 0.0
+        else:
+            logger.info(f"🗣️🤖 Initializing {self.llm_provider} LLM")
+            self.llm = LLM(
+                backend=self.llm_provider,
+                model=self.llm_model,
+                system_prompt=self.system_prompt,
+                no_think=no_think,
+            )
+            self.llm.prewarm()
+            self.llm_inference_time = self.llm.measure_inference_time()
+            logger.debug(f"🗣️🧠🕒 LLM inference time: {self.llm_inference_time:.2f}ms")
 
         # --- State ---
         self.history = []
@@ -821,13 +850,25 @@ class SpeechPipelineManager:
 
         try:
             logger.info(f"🗣️🧠🚀 [Gen {new_gen_id}] Calling LLM generate...")
-            # TODO: Update history management if needed
-            # self.history.append({"role": "user", "content": txt}) # Example history update
-            self.running_generation.llm_generator = self.llm.generate(
-                text=txt,
-                history=self.history, # Pass current history
-                use_system_prompt=True,
-            )
+            
+            # Call LLM generate based on provider
+            if self.llm_provider == "bedrock":
+                # Bedrock: Use session_id instead of history
+                # History is managed server-side by Bedrock Agent
+                self.running_generation.llm_generator = self.llm.generate(
+                    text=txt,
+                    session_id=self.bedrock_session_id,
+                    request_id=f"gen-{new_gen_id}",
+                )
+            else:
+                # Other backends: Use history and system prompt
+                # Note: History is managed in server.py, not here
+                self.running_generation.llm_generator = self.llm.generate(
+                    text=txt,
+                    history=self.history,
+                    use_system_prompt=True,
+                )
+            
             logger.info(f"🗣️🧠✔️ [Gen {new_gen_id}] LLM generator created. Setting generator ready event.")
             self.generator_ready_event.set() # Signal LLM worker
         except Exception as e:
@@ -1053,12 +1094,22 @@ class SpeechPipelineManager:
         Resets the pipeline state completely.
 
         Aborts any currently running generation (waiting for completion) and
-        clears the conversation history.
+        clears the conversation history. For Bedrock, creates a new session ID.
         """
         logger.info("🗣️🔄 Resetting pipeline state...")
         self.abort_generation(wait_for_completion=True, timeout=7.0, reason="reset") # Ensure clean slate
-        self.history = []
-        logger.info("🗣️🧹 History cleared. Reset complete.")
+        
+        if self.llm_provider == "bedrock":
+            # Create new Bedrock session (clears server-side history)
+            old_session = self.bedrock_session_id
+            self.bedrock_session_id = str(uuid.uuid4())
+            logger.info(f"🗣️🧹 Bedrock session reset: {old_session} -> {self.bedrock_session_id}")
+        else:
+            # Clear local history for other backends
+            self.history = []
+            logger.info("🗣️🧹 History cleared.")
+        
+        logger.info("🗣️🧹 Reset complete.")
 
     def shutdown(self):
         """
