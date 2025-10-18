@@ -1,0 +1,2 @@
+<link rel="icon" href="<?php echo e(setting('site.favicon', '/wave/favicon.png')); ?>" type="image/x-icon">
+<link rel="icon" href="<?php echo e(setting('site.favicon_dark', '/wave/favicon-dark.png')); ?>" type="image/png" media="(prefers-color-scheme: dark)"><?php /**PATH /Users/afyfbadreddine/Herd/mywave/resources/views/components/favicon.blade.php ENDPATH**/ ?>
