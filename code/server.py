@@ -34,12 +34,15 @@ TTS_START_ENGINE = "kokoro"
 TTS_ORPHEUS_MODEL = "Orpheus_3B-1BaseGGUF/mOrpheus_3B-1Base_Q4_K_M.gguf"
 TTS_ORPHEUS_MODEL = "orpheus-3b-0.1-ft-Q8_0-GGUF/orpheus-3b-0.1-ft-q8_0.gguf"
 
-LLM_START_PROVIDER = "ollama"
-#LLM_START_MODEL = "qwen3:30b-a3b"
-#LLM_START_MODEL = "llama3.2:latest"
-LLM_START_MODEL = "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M"
-# LLM_START_PROVIDER = "lmstudio"
-# LLM_START_MODEL = "Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q3_K_L.gguf"
+# LLM Configuration - Can be overridden by environment variables
+LLM_START_PROVIDER = os.getenv("LLM_PROVIDER", "bedrock")  # Options: "ollama", "openai", "lmstudio", "bedrock"
+LLM_START_MODEL = os.getenv("LLM_MODEL", "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M")
+
+# Bedrock-specific configuration (required when LLM_START_PROVIDER="bedrock")
+BEDROCK_AGENT_ID = os.getenv("BEDROCK_AGENT_ID", "VUEHUL2HDK")
+BEDROCK_AGENT_ALIAS_ID = os.getenv("BEDROCK_AGENT_ALIAS_ID", "JBU23UII65")
+BEDROCK_REGION = os.getenv("BEDROCK_REGION", "us-west-2")
+
 NO_THINK = False
 DIRECT_STREAM = TTS_START_ENGINE=="orpheus"
 
@@ -116,14 +119,32 @@ async def lifespan(app: FastAPI):
         app: The FastAPI application instance.
     """
     logger.info("🖥️▶️ Server starting up")
+    
+    # Log LLM configuration
+    if LLM_START_PROVIDER == "bedrock":
+        logger.info(f"🖥️⚙️ {Colors.apply('[LLM]').blue} Using Bedrock Agent: {Colors.apply(BEDROCK_AGENT_ID).blue}")
+        logger.info(f"🖥️⚙️ {Colors.apply('[LLM]').blue} Bedrock Region: {Colors.apply(BEDROCK_REGION).blue}")
+    else:
+        logger.info(f"🖥️⚙️ {Colors.apply('[LLM]').blue} Provider: {Colors.apply(LLM_START_PROVIDER).blue}, Model: {Colors.apply(LLM_START_MODEL).blue}")
+    
     # Initialize global components, not connection-specific state
-    app.state.SpeechPipelineManager = SpeechPipelineManager(
-        tts_engine=TTS_START_ENGINE,
-        llm_provider=LLM_START_PROVIDER,
-        llm_model=LLM_START_MODEL,
-        no_think=NO_THINK,
-        orpheus_model=TTS_ORPHEUS_MODEL,
-    )
+    pipeline_kwargs = {
+        "tts_engine": TTS_START_ENGINE,
+        "llm_provider": LLM_START_PROVIDER,
+        "llm_model": LLM_START_MODEL,
+        "no_think": NO_THINK,
+        "orpheus_model": TTS_ORPHEUS_MODEL,
+    }
+    
+    # Add Bedrock-specific parameters if using Bedrock
+    if LLM_START_PROVIDER == "bedrock":
+        pipeline_kwargs.update({
+            "bedrock_agent_id": BEDROCK_AGENT_ID,
+            "bedrock_agent_alias_id": BEDROCK_AGENT_ALIAS_ID,
+            "bedrock_region": BEDROCK_REGION,
+        })
+    
+    app.state.SpeechPipelineManager = SpeechPipelineManager(**pipeline_kwargs)
 
     app.state.Upsampler = UpsampleOverlap()
     app.state.AudioInputProcessor = AudioInputProcessor(
