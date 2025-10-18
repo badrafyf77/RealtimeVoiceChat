@@ -33,6 +33,20 @@ except ImportError:
     class APIConnectionError(APIError): pass
     logging.warning("🤖⚠️ openai library not installed. OpenAI/LMStudio backends will not function.")
 
+# --- Bedrock Dependencies ---
+try:
+    import boto3
+    from botocore.exceptions import ClientError
+    from bedrock_backend import BedrockClientWrapper, BedrockSessionManager, CancellationToken, invoke_bedrock_with_callbacks
+    BEDROCK_AVAILABLE = True
+except ImportError:
+    BEDROCK_AVAILABLE = False
+    BedrockClientWrapper = None
+    BedrockSessionManager = None
+    CancellationToken = None
+    invoke_bedrock_with_callbacks = None
+    logging.warning("🤖⚠️ bedrock_backend library not installed. Bedrock backend will not function.")
+
 # Configure logging
 # Use the root logger configured by the main application if available, else basic config
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -186,11 +200,11 @@ class LLM:
     """
     Provides a unified interface for interacting with various LLM backends.
 
-    Supports Ollama (via direct HTTP), OpenAI API, and LMStudio (via OpenAI-compatible API).
+    Supports Ollama (via direct HTTP), OpenAI API, LMStudio (via OpenAI-compatible API), and AWS Bedrock.
     Handles client initialization, streaming generation, request cancellation,
     system prompts, and basic connection management including an optional `ollama ps` check.
     """
-    SUPPORTED_BACKENDS = ["ollama", "openai", "lmstudio"]
+    SUPPORTED_BACKENDS = ["ollama", "openai", "lmstudio", "bedrock"]
 
     def __init__(
         self,
@@ -234,11 +248,14 @@ class LLM:
 
         self.client: Optional[OpenAI] = None
         self.ollama_session: Optional[Session] = None
+        self.bedrock_client: Optional['BedrockClientWrapper'] = None
+        self.bedrock_sessions: Optional['BedrockSessionManager'] = None
         self._client_initialized: bool = False
         self._client_init_lock = Lock()
         self._active_requests: Dict[str, Dict[str, Any]] = {}
         self._requests_lock = Lock()
         self._ollama_connection_ok: bool = False # Added explicit init
+        self._bedrock_initialized: bool = False
 
         logger.info(f"🤖⚙️ Configuring LLM instance: backend='{self.backend}', model='{self.model}'")
 
@@ -246,6 +263,9 @@ class LLM:
         self.effective_ollama_url = self._base_url or OLLAMA_BASE_URL if self.backend == "ollama" else None
         self.effective_lmstudio_url = self._base_url or LMSTUDIO_BASE_URL if self.backend == "lmstudio" else None
         self.effective_openai_base_url = self._base_url if self.backend == "openai" and self._base_url else None
+        self.effective_bedrock_region = os.getenv("AWS_REGION", "us-west-2")
+        self.effective_bedrock_agent_id = os.getenv("BEDROCK_AGENT_ID", "")
+        self.effective_bedrock_agent_alias_id = os.getenv("BEDROCK_AGENT_ALIAS_ID", "")
 
         if self.backend == "ollama" and self.effective_ollama_url:
              url = self.effective_ollama_url
@@ -258,6 +278,8 @@ class LLM:
         if self.backend == "ollama" and REQUESTS_AVAILABLE:
             self.ollama_session = requests.Session()
             logger.info("🤖🔌 Initialized requests.Session for Ollama backend.")
+        elif self.backend == "bedrock" and BEDROCK_AVAILABLE:
+            logger.info("🤖🔌 Initialized Bedrock client wrapper.")
 
         self.system_prompt_message = None
         if self.system_prompt:
@@ -290,6 +312,7 @@ class LLM:
             logger.debug(f"🤖🔄 Lazy initializing/checking connection for backend: {self.backend}")
             init_ok = False
             self._ollama_connection_ok = False # Reset Ollama specific flag
+            self._bedrock_initialized = False  # Reset Bedrock specific flag
 
             try:
                 if self.backend == "openai":
@@ -328,6 +351,22 @@ class LLM:
                     else:
                         logger.error("🤖💥 Ollama session object is None or URL not set during lazy init.")
                         init_ok = False
+                elif self.backend == "bedrock":
+                    if BEDROCK_AVAILABLE:
+                        # Check if required environment variables are set before initializing
+                        if not self.effective_bedrock_agent_id or not self.effective_bedrock_agent_alias_id:
+                            logger.error("🤖💥 Bedrock backend selected but BEDROCK_AGENT_ID or BEDROCK_AGENT_ALIAS_ID environment variables not set.")
+                            init_ok = False
+                        else:
+                            # Initialize Bedrock client and session manager
+                            self.bedrock_client = BedrockClientWrapper(region_name=self.effective_bedrock_region)
+                            self.bedrock_sessions = BedrockSessionManager()
+                            init_ok = True
+                            self._bedrock_initialized = True
+                            logger.info(f"🤖✅ Bedrock client initialized successfully in region: {self.effective_bedrock_region}")
+                    else:
+                        logger.error("🤖💥 Bedrock backend selected but bedrock_backend library not available.")
+                        init_ok = False
 
                 if init_ok:
                     logger.info(f"🤖✅ Client/Connection initialized successfully for backend: {self.backend}.")
@@ -342,6 +381,8 @@ class LLM:
                 # Ensure connection flag reflects reality if init failed
                 if self.backend == "ollama" and not init_ok:
                     self._ollama_connection_ok = False
+                elif self.backend == "bedrock" and not init_ok:
+                    self._bedrock_initialized = False
 
             return init_ok
 
@@ -416,6 +457,11 @@ class LLM:
                     logger.debug(f"🤖🗑️ [{request_id}] Attempting to close stream/response object...")
                     stream_obj.close()
                     logger.info(f"🤖🗑️ Closed stream/response for cancelled request {request_id}.")
+                elif isinstance(stream_obj, CancellationToken):
+                    # For Bedrock, cancel the cancellation token
+                    logger.debug(f"🤖🗑️ [{request_id}] Cancelling Bedrock request with cancellation token...")
+                    stream_obj.cancel()
+                    logger.info(f"🤖🗑️ Cancelled Bedrock request {request_id} using cancellation token.")
                 else:
                     logger.warning(f"🤖⚠️ [{request_id}] Stream object of type {type(stream_obj)} does not have a callable 'close' method. Cannot explicitly close.")
             except Exception as e:
@@ -598,6 +644,7 @@ class LLM:
         history: Optional[List[Dict[str, str]]] = None,
         use_system_prompt: bool = True,
         request_id: Optional[str] = None,
+        bedrock_session_id: Optional[str] = None,
         **kwargs: Any
     ) -> Generator[str, None, None]:
         """
@@ -611,6 +658,7 @@ class LLM:
             history: An optional list of previous messages (dicts with "role" and "content").
             use_system_prompt: If True, prepends the configured system prompt (if any).
             request_id: An optional unique ID for this generation request. If None, one is generated.
+            bedrock_session_id: An optional session ID to maintain conversation state with Bedrock.
             **kwargs: Additional backend-specific keyword arguments (e.g., temperature, top_p, stop sequences).
 
         Yields:
@@ -711,6 +759,44 @@ class LLM:
                 stream_object_to_register = response # The requests.Response object
                 self._register_request(req_id, "ollama", stream_object_to_register)
                 yield from self._yield_ollama_chunks(response, req_id)
+
+            elif self.backend == "bedrock":
+                if not BEDROCK_AVAILABLE:
+                    raise RuntimeError("Bedrock backend selected but bedrock_backend library not available.")
+                if self.bedrock_client is None or self.bedrock_sessions is None:
+                    raise RuntimeError("Bedrock client not initialized (should have been caught by lazy_init).")
+                
+                # Get or create session for this conversation
+                # For WebSocket connections, we'll need to pass session_id from the connection context
+                # For now, we'll create a session ID per generation request
+                session_id = self.bedrock_sessions.get_or_create(None, tag=f"req-{req_id}")
+                
+                logger.info(f"🤖💬 [{req_id}] Sending Bedrock request to agent {self.effective_bedrock_agent_id} with session {session_id}")
+                
+                # Create cancellation token for this request
+                cancel_token = CancellationToken()
+                
+                # Register the cancellation token for this request ID
+                self._register_request(req_id, "bedrock", cancel_token)
+                
+                # Define callback functions to handle the streaming
+                def on_chunk(text: str):
+                    # Yield the text chunk
+                    yield text  # This won't work directly in this context - we'll need to restructure
+                    # Instead, we'll use a queue-like approach for this implementation
+                    pass
+                
+                # Get the text from the input (the first user message)
+                text_input = messages[-1]['content'] if messages and messages[-1]['role'] == 'user' else text
+                
+                # Use provided bedrock_session_id if available, otherwise create/get one
+                if bedrock_session_id:
+                    session_id = self.bedrock_sessions.get_or_create(bedrock_session_id, tag=f"req-{req_id}")
+                else:
+                    session_id = self.bedrock_sessions.get_or_create(None, tag=f"req-{req_id}")
+                
+                # Since we can't directly yield from the callback, we'll use a generator wrapper
+                yield from self._yield_bedrock_chunks(text_input, session_id, cancel_token)
 
             else:
                 # This case should technically be caught by __init__
@@ -816,8 +902,7 @@ class LLM:
                      logger.warning(f"🤖⚠️ [{request_id}] Error closing OpenAI stream in finally: {close_err}", exc_info=False)
 
     def _yield_ollama_chunks(self, response: requests.Response, request_id: str) -> Generator[str, None, None]:
-        """
-        Iterates over an Ollama HTTP response stream, decoding JSON lines and yielding content.
+        \"\"\"Iterates over an Ollama HTTP response stream, decoding JSON lines and yielding content.
 
         Handles reading bytes, decoding UTF-8, parsing JSON chunks, extracting message content,
         and checking for the 'done' signal. Checks for cancellation before processing each chunk.
@@ -835,9 +920,9 @@ class LLM:
             ConnectionError: If a connection error occurs during streaming, unless likely due to cancellation.
             requests.exceptions.RequestException: For other request-related errors during streaming.
             Exception: For JSON decoding errors or other unexpected issues.
-        """
+        \"\"\"
         token_count = 0
-        buffer = ""
+        buffer = \"\"
         processed_done = False # Flag to track if 'done' message was processed
         try:
             # --- Start Change ---
@@ -847,7 +932,7 @@ class LLM:
                     # Check for cancellation *before* processing chunk
                     with self._requests_lock:
                         if request_id not in self._active_requests:
-                            logger.info(f"🤖🗑️ Ollama stream {request_id} cancelled or finished externally during iteration (pre-chunk check).")
+                            logger.info(f\"🤖🗑️ Ollama stream {request_id} cancelled or finished externally during iteration (pre-chunk check).\"))
                             break # Exit the loop cleanly
 
                     if not chunk_bytes:
@@ -864,24 +949,24 @@ class LLM:
                         try:
                             chunk = json.loads(line)
                             if chunk.get('error'):
-                                logger.error(f"🤖💥 Ollama stream returned error for {request_id}: {chunk['error']}")
-                                raise RuntimeError(f"Ollama stream error: {chunk['error']}")
+                                logger.error(f\"🤖💥 Ollama stream returned error for {request_id}: {chunk['error']}\"\"))
+                                raise RuntimeError(f\"Ollama stream error: {chunk['error']}\"\")
                             content = chunk.get('message', {}).get('content')
                             if content:
                                 token_count += 1
                                 yield content
                             if chunk.get('done'):
-                                logger.debug(f"🤖✅ [{request_id}] Ollama signalled 'done'.")
+                                logger.debug(f\"🤖✅ [{request_id}] Ollama signalled 'done'.\"\")
                                 # Ensure any remaining buffer is cleared (should be unlikely if 'done' is last)
-                                buffer = ""
+                                buffer = \"\"
                                 processed_done = True # Mark done as processed
                                 break # Exit inner while loop on 'done'
                         except json.JSONDecodeError:
-                            logger.warning(f"🤖⚠️ [{request_id}] Failed to decode JSON line: '{line[:100]}...'")
+                            logger.warning(f\"🤖⚠️ [{request_id}] Failed to decode JSON line: '{line[:100]}...'\"\")
                             # Continue trying to process buffer
                         except Exception as e:
                             # Reraise other exceptions during JSON processing
-                            logger.error(f"🤖💥 [{request_id}] Error processing Ollama stream chunk: {e}", exc_info=True)
+                            logger.error(f\"🤖💥 [{request_id}] Error processing Ollama stream chunk: {e}\", exc_info=True)
                             raise # Reraise for outer try/except
 
                     # If 'done' was received and processed, break outer loop too
@@ -896,18 +981,18 @@ class LLM:
 
                 # More robust check: verify it's the expected NoneType error on read
                 # and ideally confirm cancellation happened concurrently.
-                if "'NoneType' object has no attribute 'read'" in str(e):
+                if \"'NoneType' object has no attribute 'read'\" in str(e):
                     # This is the specific error we expect from response.close() being called concurrently.
                     if is_cancelled:
-                        logger.warning(f"🤖⚠️ [{request_id}] Caught AttributeError ('NoneType' has no attribute 'read') during Ollama stream iteration, likely due to concurrent cancellation. Stopping iteration.")
+                        logger.warning(f\"🤖⚠️ [{request_id}] Caught AttributeError ('NoneType' has no attribute 'read') during Ollama stream iteration, likely due to concurrent cancellation. Stopping iteration.\"\"\")
                     else:
                         # This case is less likely but possible if the error source is different,
                         # or cancellation happened *just* after the check but before the exception.
-                        logger.warning(f"🤖⚠️ [{request_id}] Caught AttributeError ('NoneType' has no attribute 'read') during Ollama stream iteration. Request *might* not be marked cancelled yet, but stopping iteration as stream is likely closed.")
+                        logger.warning(f\"🤖⚠️ [{request_id}] Caught AttributeError ('NoneType' has no attribute 'read') during Ollama stream iteration. Request *might* not be marked cancelled yet, but stopping iteration as stream is likely closed.\"\"\")
                     # Break the (now non-existent) outer loop implicitly by exiting the 'try' block.
                 else:
                     # If it's a different AttributeError, re-raise it.
-                    logger.error(f"🤖💥 [{request_id}] Caught unexpected AttributeError during Ollama stream iteration: {e}", exc_info=True)
+                    logger.error(f\"🤖💥 [{request_id}] Caught unexpected AttributeError during Ollama stream iteration: {e}\", exc_info=True)
                     raise e
             # --- End Change ---
 
@@ -916,7 +1001,7 @@ class LLM:
             if not processed_done: # Only log this if we didn't finish normally
                 with self._requests_lock:
                     if request_id not in self._active_requests:
-                        logger.info(f"🤖🗑️ Ollama stream {request_id} processing stopped due to cancellation flag after loop.")
+                        logger.info(f\"🤖🗑️ Ollama stream {request_id} processing stopped due to cancellation flag after loop.\"\"\")
 
             logger.debug(f"🤖✅ [{request_id}] Finished yielding {token_count} Ollama tokens (processed_done={processed_done}).")
 
@@ -959,6 +1044,77 @@ class LLM:
                      response.close()
                  except Exception as close_err:
                      logger.warning(f"🤖⚠️ [{request_id}] Error closing Ollama response in finally: {close_err}", exc_info=False)
+
+    def _yield_bedrock_chunks(self, text_input: str, session_id: str, cancel_token: CancellationToken) -> Generator[str, None, None]:
+        """
+        Iterates over a Bedrock agent response stream and yields content.
+
+        Handles the Bedrock streaming response by using the invoke_bedrock_with_callbacks function
+        from the bedrock_backend module, yielding content as it's received.
+
+        Args:
+            text_input: The text input to send to the Bedrock agent.
+            session_id: The session ID to maintain conversation state.
+            cancel_token: The cancellation token to interrupt the stream if needed.
+
+        Yields:
+            str: Content chunks from the Bedrock agent's response.
+        """
+        import queue
+        chunk_queue = queue.Queue()
+        
+        def on_chunk(text: str):
+            chunk_queue.put(("chunk", text))
+        
+        def on_complete():
+            chunk_queue.put(("complete", None))
+        
+        def on_trace(trace_data: Dict[str, Any]):
+            # Optionally log trace data for debugging
+            logger.debug(f"Bedrock trace: {trace_data}")
+        
+        # Start the Bedrock invocation in a separate thread so we can yield from this function
+        def bedrock_invoker():
+            try:
+                invoke_bedrock_with_callbacks(
+                    agent_id=self.effective_bedrock_agent_id,
+                    alias_id=self.effective_bedrock_agent_alias_id,
+                    session_id=session_id,
+                    prompt=text_input,
+                    client_wrapper=self.bedrock_client,
+                    on_chunk=on_chunk,
+                    on_trace=on_trace,
+                    on_complete=on_complete,
+                    cancel_token=cancel_token,
+                    streaming_config={"streamFinalResponse": True, "applyGuardrailInterval": 10},
+                    enable_trace=False,
+                    end_session=False,
+                )
+            except Exception as e:
+                logger.error(f"Error in Bedrock invocation: {e}")
+                chunk_queue.put(("error", str(e)))
+        
+        import threading
+        thread = threading.Thread(target=bedrock_invoker)
+        thread.start()
+        
+        # Yield chunks as they come in
+        while True:
+            try:
+                item_type, payload = chunk_queue.get(timeout=1.0)
+                if item_type == "chunk":
+                    yield payload
+                elif item_type == "complete":
+                    break
+                elif item_type == "error":
+                    raise RuntimeError(f"Bedrock error: {payload}")
+            except queue.Empty:
+                # Check if the thread is still alive
+                if not thread.is_alive():
+                    break
+                continue
+        
+        thread.join()
 
     def measure_inference_time(
         self,

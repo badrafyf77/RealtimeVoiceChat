@@ -259,7 +259,14 @@ class SpeechPipelineManager:
                 logger.debug(f"🗣️🔄 Request Processor: Processing most recent request - {request.action}")
                 
                 if request.action == "prepare":
-                    self.process_prepare_generation(request.data)
+                    # Handle both old format (string) and new format (dict)
+                    if isinstance(request.data, dict):
+                        text = request.data.get('text', '')
+                        bedrock_session_id = request.data.get('bedrock_session_id')
+                        self.process_prepare_generation(text, bedrock_session_id)
+                    else:
+                        # Backwards compatibility with string-only format
+                        self.process_prepare_generation(request.data)
                     self.previous_request = request
                 elif request.action == "finish":
                      # Note: 'finish' action currently has no specific handling logic here.
@@ -774,7 +781,7 @@ class SpeechPipelineManager:
 
     # --- Processing Methods ---
 
-    def process_prepare_generation(self, txt: str):
+    def process_prepare_generation(self, txt: str, bedrock_session_id: Optional[str] = None):
         """
         Handles the 'prepare' action: initiates a new text-to-speech generation.
 
@@ -790,6 +797,7 @@ class SpeechPipelineManager:
 
         Args:
             txt: The user input text for the new generation.
+            bedrock_session_id: Optional session ID for Bedrock agent to maintain conversation state.
         """
         # --- Abort existing generation if necessary ---
         id_in_spec = self.generation_counter + 1 # Prospective ID for logging
@@ -827,6 +835,7 @@ class SpeechPipelineManager:
                 text=txt,
                 history=self.history, # Pass current history
                 use_system_prompt=True,
+                bedrock_session_id=bedrock_session_id,
             )
             logger.info(f"🗣️🧠✔️ [Gen {new_gen_id}] LLM generator created. Setting generator ready event.")
             self.generator_ready_event.set() # Signal LLM worker
@@ -987,7 +996,7 @@ class SpeechPipelineManager:
 
     # --- Public Methods ---
 
-    def prepare_generation(self, txt: str):
+    def prepare_generation(self, txt: str, bedrock_session_id: Optional[str] = None):
         """
         Public method to request the preparation of a new speech generation.
 
@@ -996,9 +1005,15 @@ class SpeechPipelineManager:
 
         Args:
             txt: The user input text to be synthesized.
+            bedrock_session_id: Optional session ID for Bedrock agent to maintain conversation state.
         """
         logger.info(f"🗣️📥 Queueing 'prepare' request for: '{txt[:50]}...'")
-        self.requests_queue.put(PipelineRequest("prepare", txt))
+        # Create a data object that includes both text and session ID
+        request_data = {
+            'text': txt,
+            'bedrock_session_id': bedrock_session_id
+        }
+        self.requests_queue.put(PipelineRequest("prepare", request_data))
 
     def finish_generation(self):
         """

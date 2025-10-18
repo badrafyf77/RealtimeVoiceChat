@@ -34,9 +34,9 @@ TTS_START_ENGINE = "kokoro"
 TTS_ORPHEUS_MODEL = "Orpheus_3B-1BaseGGUF/mOrpheus_3B-1Base_Q4_K_M.gguf"
 TTS_ORPHEUS_MODEL = "orpheus-3b-0.1-ft-Q8_0-GGUF/orpheus-3b-0.1-ft-q8_0.gguf"
 
-LLM_START_PROVIDER = "ollama"
+LLM_START_PROVIDER = "bedrock"
 #LLM_START_MODEL = "qwen3:30b-a3b"
-LLM_START_MODEL = "llama3.2:latest"
+LLM_START_MODEL = "bedrock-model"  # Not used for Bedrock but kept for compatibility
 # LLM_START_MODEL = "hf.co/bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF:Q4_K_M"
 # LLM_START_PROVIDER = "lmstudio"
 # LLM_START_MODEL = "Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q3_K_L.gguf"
@@ -597,6 +597,9 @@ class TranscriptionCallbacks:
         self.sent_sentences: list = []  # Track sentences already sent to client
         self.sentence_counter: int = 0  # Counter for unique sentence IDs
 
+        # Bedrock session management
+        self.bedrock_session_id: Optional[str] = None  # Session ID for Bedrock agent
+
         self.reset_state() # Call reset to ensure consistency
 
         self.abort_request_event = threading.Event()
@@ -724,7 +727,7 @@ class TranscriptionCallbacks:
         """
         logger.debug(f"🖥️🧠 Potential sentence: '{txt}'")
         # Access global manager state
-        self.app.state.SpeechPipelineManager.prepare_generation(txt)
+        self.app.state.SpeechPipelineManager.prepare_generation(txt, self.bedrock_session_id)
 
     def on_potential_final(self, txt: str):
         """
@@ -792,6 +795,12 @@ class TranscriptionCallbacks:
         logger.info(f"🖥️🧠 Adding user request to history: '{user_request_content}'")
         # Access global manager state
         self.app.state.SpeechPipelineManager.history.append({"role": "user", "content": user_request_content})
+        
+        # Update Bedrock session ID if it was created during this interaction
+        if hasattr(self.app.state.SpeechPipelineManager.llm, 'bedrock_sessions') and self.app.state.SpeechPipelineManager.llm.bedrock_sessions:
+            # Update the session's last used time
+            if self.bedrock_session_id:
+                self.app.state.SpeechPipelineManager.llm.bedrock_sessions.touch(self.bedrock_session_id)
 
     def on_final(self, txt: str):
         """
@@ -859,6 +868,12 @@ class TranscriptionCallbacks:
         generation, sends any final assistant answer generated so far, and resets relevant state.
         """
         logger.info(f"{Colors.ORANGE}🖥️🎙️ Recording started.{Colors.RESET} TTS Client Playing: {self.tts_client_playing}")
+        
+        # Initialize Bedrock session if not already created
+        if self.bedrock_session_id is None and hasattr(self.app.state.SpeechPipelineManager.llm, 'bedrock_sessions'):
+            if self.app.state.SpeechPipelineManager.llm.bedrock_sessions:
+                self.bedrock_session_id = self.app.state.SpeechPipelineManager.llm.bedrock_sessions.create_session(tag=f"ws-{id(self)}")
+        
         # Use connection-specific tts_client_playing flag
         if self.tts_client_playing:
             self.tts_to_client = False # Stop server sending TTS
